@@ -73,9 +73,13 @@ def load_group_watchlist() -> list[str]:
 ##   - Used to detect price/volume movement (heartbeat)
 ## -------------------------------------------------------------------
 from collections import deque, defaultdict
+import concurrent.futures
 
 # Global snapshot history (in-memory)
 SNAPSHOT_HISTORY = defaultdict(lambda: deque(maxlen=5))
+
+# Flag to allow pass-through on the first market scan after history clear
+MARKET_OPEN_FIRST_SCAN = True
 
 def record_snapshot(ticker: str, price: float, volume: int, timestamp: datetime = None) -> None:
     """Record a snapshot for heartbeat tracking."""
@@ -113,6 +117,9 @@ def get_market_open_price(ticker: str) -> float:
 def clear_market_open_prices() -> None:
     """Clear all market open prices (call at start of new trading day)."""
     MARKET_OPEN_PRICES.clear()
+
+# Marker to guarantee the first-market pass is used only once per process
+MARKET_OPEN_FIRST_SCAN_USED = False
 
 def is_market_open() -> bool:
     """Check if market is currently open (after 9:30 AM)."""
@@ -186,9 +193,42 @@ def has_heartbeat(ticker: str, min_price_change_pct: float = 0.5, min_volume_gro
     """
     history = get_snapshot_history(ticker)
 
-    # Allow pass-through on first scan (no history yet)
+    # Determine market state defensively
+    try:
+        now_market_open = is_market_open()
+    except Exception:
+        now_market_open = False
+
+    # If we have very little history, decide based on session:
+    # - Premarket: allow a per-ticker first_scan_pass so we can show something
+    # - Market open: only allow a global one-time first_market_pass controlled by
+    #   MARKET_OPEN_FIRST_SCAN. After that, insufficient history should fail.
     if len(history) < 2:
-        return True, "first_scan_pass"
+        if not now_market_open:
+            return True, "first_scan_pass"
+        # We're in market hours with insufficient history; allow a one-time
+        # global pass-through if the operator requested it on startup.
+        # Use an explicit USED flag to prevent any possibility of the
+        # global being observed as True across multiple tickers due to
+        # unexpected module reloads or race conditions.
+        global MARKET_OPEN_FIRST_SCAN_USED
+        if MARKET_OPEN_FIRST_SCAN and not MARKET_OPEN_FIRST_SCAN_USED and now_market_open:
+            try:
+                globals()["MARKET_OPEN_FIRST_SCAN"] = False
+            except Exception:
+                pass
+            try:
+                globals()["MARKET_OPEN_FIRST_SCAN_USED"] = True
+                MARKET_OPEN_FIRST_SCAN_USED = True
+            except Exception:
+                pass
+            # Diagnostic log to make the one-time pass visible in logs
+            try:
+                logging.getLogger("scanner").info(f"DBG: has_heartbeat -> issuing first_market_pass for {ticker}")
+            except Exception:
+                pass
+            return True, "first_market_pass"
+        return False, f"insufficient_history"
 
     # Get adaptive window
     window_minutes = get_heartbeat_window_minutes()
@@ -357,6 +397,48 @@ def calculate_composite_score(ticker: str, gap_pct: float, current_price: float,
     composite = gap_score + delta_score + vol_score + velocity_bonus
 
     return composite
+
+
+def _compute_display_score_from_row(row: dict) -> float:
+    """Compute a lightweight display score for sorting/logging purposes.
+
+    This mirrors the local scoring used as a fallback but does NOT call
+    heartbeat (no velocity bonus) so it can be computed for all candidates.
+    """
+    try:
+        w = {
+            "gap": 0.4,
+            "rvol": 0.3,
+            "atr": 0.2,
+        }
+        gap = float(row.get("gap_pct") or 0.0)
+        rvol = float(row.get("rvol") or 0.0)
+        atr = float(row.get("atr_stretch") or 0.0)
+        score = (w["gap"] * gap) + (w["rvol"] * min(rvol, 5.0)) + (w["atr"] * min(atr, 5.0))
+        return float(score)
+    except Exception:
+        return 0.0
+
+
+def _format_full_labels(row: dict, heartbeat_tag: str | None, display_score: float) -> str:
+    """Return formatted log line with full labels: gap=.. last=.. open=.. vol=.. plus atr_stretch/rvol/score"""
+    ticker = row.get("ticker") or "N/A"
+    gap = row.get("gap_pct")
+    last = row.get("last_price") or row.get("price") or ""
+    open_ref = row.get("open_price") if row.get("open_price") is not None else row.get("prev")
+    vol = row.get("volume") or row.get("intraday_volume") or 0
+
+    gap_str = _fmt_gap(last, open_ref) if (last and open_ref) else (f"{gap:+.1f}%" if isinstance(gap, (int, float)) else str(gap or "n/a"))
+    last_str = _fmt_num(last, 2)
+    open_str = _fmt_num(open_ref, 2)
+    vol_str = _fmt_vol(vol)
+
+    atr = row.get("atr_stretch") or "-"
+    rvol = row.get("rvol") or "-"
+
+    hb = f" [{heartbeat_tag}]" if heartbeat_tag else ""
+
+    return f"{ticker}: gap={gap_str} last={last_str} open={open_str} vol={vol_str}{hb} atr_stretch={atr} rvol={rvol} score={display_score:.1f}"
 
 ## -------------------------------------------------------------------
 ## BLOCK: deficient-ticker-filter  |  FILE: src/scanner/scanner.py  |  DATE: 2025-10-03
@@ -541,6 +623,15 @@ def prefilter_top_gappers(snaps: list[dict], n: int = 100, min_price: float = 1.
         except Exception:
             skipped_missing += 1
             continue
+
+        # EARLY SNAPSHOT: record a lightweight snapshot now for heartbeat history
+        # if the ticker meets the lightweight prefilter. This prevents later
+        # downstream filters from causing the ticker to appear as a "first"
+        # observation during the active session.
+        try:
+            record_snapshot(ticker, price_f, int(s.get("volume", 0) or 0))
+        except Exception:
+            pass
 
         s2 = dict(s)
         s2["_gap_pct_snapshot"] = gap
@@ -1014,8 +1105,12 @@ def run_once(cfg: dict, logger: logging.Logger, force_final_pick: bool = False) 
                 continue
             try:
                 gap = (price - prev) / prev * 100.0
-                # Record snapshot to history (for next iteration)
-                record_snapshot(ticker, price, vol)
+                # EARLY SNAPSHOT: record now so later filters don't prevent
+                # heartbeat from seeing this ticker as an observed history item.
+                try:
+                    record_snapshot(ticker, price, vol)
+                except Exception:
+                    pass
                 top.append((ticker, gap, price, prev, vol))
             except Exception:
                 continue
@@ -1055,13 +1150,11 @@ def run_once(cfg: dict, logger: logging.Logger, force_final_pick: bool = False) 
         scored_candidates.sort(key=lambda x: x['score'], reverse=True)
 
         if scored_candidates:
-            for item in scored_candidates[:5]:
-                gap_str = _fmt_gap(item['price'], item['prev'])
-                last_str = _fmt_num(item['price'], 2)
-                prev_str = _fmt_num(item['prev'], 2)
-                vol_str = _fmt_vol(item['volume'])
-                score_str = f"{item['score']:.1f}"
-                logger.info(f"   {item['ticker']}: score={score_str} gap={gap_str} last={last_str} prev={prev_str} vol={vol_str} [{item['heartbeat']}]")
+            # Always show Top-5 by display score (highest->lowest). Annotate heartbeat reason.
+            for item in sorted(scored_candidates, key=lambda x: _compute_display_score_from_row(x), reverse=True)[:5]:
+                display_score = _compute_display_score_from_row(item)
+                hb = item.get('heartbeat')
+                logger.info("   " + _format_full_labels(item, hb, display_score))
         else:
             logger.info(f"   (No active tickers with heartbeat - all are stale/frozen)")
 
@@ -1113,8 +1206,12 @@ def run_once(cfg: dict, logger: logging.Logger, force_final_pick: bool = False) 
                 continue
             try:
                 gap = (price - prev) / prev * 100.0
-                # Record snapshot to history
-                record_snapshot(ticker, price, vol)
+                # EARLY SNAPSHOT (fallback path): ensure heartbeat history exists
+                # even for fallback candidates so the active loop can use it.
+                try:
+                    record_snapshot(ticker, price, vol)
+                except Exception:
+                    pass
                 fallback.append((ticker, gap, price, prev, vol))
             except Exception:
                 continue
@@ -1209,8 +1306,31 @@ def run_open_selection_once(cfg: dict, logger: logging.Logger, force: bool = Fal
             gap = candidate.get('gap_pct', 0)
             rvol = candidate.get('rvol', 0)
             logger.info(f"  #{i}: {ticker} - score={score:.1f}, gap={gap:.1f}%, rvol={rvol:.1f}x")
-
-        winner = _pick_winner(scored)
+        # PROTECTION: Run deep deficiency checks only for top-N candidates to avoid
+        # making many blocking API calls. Use polygon_adapter.is_ticker_deficient_fast
+        # with a short timeout. If a candidate is deficient we skip it.
+        try:
+            from src.adapters.polygon_adapter import is_ticker_deficient_fast
+            deep_limit = int((cfg.get("open_selection", {}) or {}).get("deep_deficiency_limit", 20))
+            vetted: list[dict] = []
+            for candidate in scored[: deep_limit]:
+                tkr = candidate.get("ticker")
+                try:
+                    deficient, reason = is_ticker_deficient_fast(tkr, timeout=5)
+                    if deficient:
+                        logger.info(f"   [D] Skipping deficient ticker {tkr}: {reason}")
+                        continue
+                except Exception:
+                    # On error, assume OK
+                    pass
+                vetted.append(candidate)
+            # Append remaining scored items (beyond deep_limit) without deep checks
+            if len(scored) > deep_limit:
+                vetted.extend(scored[deep_limit:])
+            winner = _pick_winner(vetted)
+        except Exception:
+            # If anything fails, fall back to naive picker
+            winner = _pick_winner(scored)
         if not winner:
             raise RuntimeError("No winner returned by scoring")
 
@@ -1265,6 +1385,12 @@ def run_open_selection_once(cfg: dict, logger: logging.Logger, force: bool = Fal
 def run() -> None:
     cfg = load_config()
     logger = setup_logger(cfg["output"]["log"])
+
+    # Diagnostic: log process id and initial MARKET_OPEN_FIRST_SCAN state
+    try:
+        logger.info(f"PID={os.getpid()} MARKET_OPEN_FIRST_SCAN={MARKET_OPEN_FIRST_SCAN}")
+    except Exception:
+        pass
 
     # Always reset/seed today_pick with the template at process start
     ensure_today_pick_ready(cfg, reset=True)
@@ -1359,6 +1485,23 @@ def run() -> None:
             logger.info("🏁 Top 5 (Composite Score - Heartbeat Active):")
             scored_tickers = []
 
+            # Per-scan allowance: permit exactly one ticker in this active
+            # scan to receive a 'first_market_pass' if history is insufficient.
+            # This avoids multiple tickers getting the tag in the same cycle.
+            allow_one_first_market_pass = False
+            try:
+                if MARKET_OPEN_FIRST_SCAN and is_market_open():
+                    allow_one_first_market_pass = True
+                    # Clear the global immediately so other processes/threads
+                    # do not also attempt to use it.
+                    try:
+                        globals()["MARKET_OPEN_FIRST_SCAN"] = False
+                    except Exception:
+                        pass
+                    logger.info("🔔 First market scan allowance set for this cycle")
+            except Exception:
+                allow_one_first_market_pass = False
+
             for s in snaps:
                 ticker = s.get("ticker", "")
                 excluded_endings = ("F", "W", "Y", "U", "PS", "AS", "WS", "RS")
@@ -1406,13 +1549,31 @@ def run() -> None:
                     # Record snapshot to history
                     record_snapshot(ticker, price_f, vol)
 
-                    # Check 1: Tradeability (suffix-based filter + NASDAQ deficiency rule)
+                    # Check 1: Tradeability (suffix-based filter only - fast path)
                     is_tradeable, trade_reason = is_ticker_tradeable_fast(ticker)
                     if not is_tradeable:
                         continue  # Skip non-tradeable tickers (silent filter)
 
                     # Check 2: Heartbeat (is it moving?)
-                    has_pulse, reason = has_heartbeat(ticker, min_price_change_pct=0.5, min_volume_growth=1000)
+                    # If we allowed one first-market-pass for this scan, pass a
+                    # flag to has_heartbeat so it can issue the one-time tag
+                    # only for a single candidate.
+                    has_pulse = False
+                    reason = ""
+                    try:
+                        if allow_one_first_market_pass:
+                            # Try with allowance; has_heartbeat will consume the
+                            # allowance via the global USED flag we set earlier.
+                            has_pulse, reason = has_heartbeat(ticker, min_price_change_pct=0.5, min_volume_growth=1000)
+                            # If this ticker received the first_market_pass, mark
+                            # that we've consumed the per-scan allowance so no
+                            # other ticker can be granted it during this scan.
+                            if reason == "first_market_pass":
+                                allow_one_first_market_pass = False
+                        else:
+                            has_pulse, reason = has_heartbeat(ticker, min_price_change_pct=0.5, min_volume_growth=1000)
+                    except Exception:
+                        has_pulse, reason = False, "heartbeat_error"
                     if not has_pulse:
                         continue  # Skip stagnant tickers
 
@@ -1435,19 +1596,27 @@ def run() -> None:
             # Sort by composite score
             scored_tickers.sort(key=lambda x: x['score'], reverse=True)
 
-            # Log top 5
-            for item in scored_tickers[:5]:
-                ref_price = item['open_price']
-                is_intraday = (ref_price != item['prev'])  # Are we using open price or prev_close?
-                gap_label = "chg" if is_intraday else "gap"
-                ref_label = "open" if is_intraday else "prev"
+            # After scoring, clear the MARKET_OPEN_FIRST_SCAN flag so subsequent
+            # market scans will use full heartbeat behavior.
+            try:
+                # Diagnostic: log the flag and market state so it appears in
+                # the normal INFO-level log output. This helps debug why the
+                # first-market-pass tag may persist across scans.
+                logger.info(f"DBG: MARKET_OPEN_FIRST_SCAN={MARKET_OPEN_FIRST_SCAN} is_market_open={is_market_open()}")
+                if MARKET_OPEN_FIRST_SCAN and is_market_open():
+                    # Clear the module-level flag explicitly. Using globals() avoids
+                    # accidentally creating a local variable in this function scope
+                    # which would leave the module-level flag unchanged.
+                    globals()["MARKET_OPEN_FIRST_SCAN"] = False
+                    logger.info("🔔 First market scan completed - enabling normal heartbeat checks")
+            except Exception:
+                pass
 
-                gap_str = _fmt_gap(item['price'], ref_price)
-                last_str = _fmt_num(item['price'], 2)
-                ref_str = _fmt_num(ref_price, 2)
-                vol_str = _fmt_vol(item['volume'])
-                score_str = f"{item['score']:.1f}"
-                logger.info(f"   {item['ticker']}: score={score_str} {gap_label}={gap_str} last={last_str} {ref_label}={ref_str} vol={vol_str} [{item['heartbeat']}]")
+            # Always show Top-5 by display score (highest->lowest). Annotate heartbeat reason.
+            for item in sorted(scored_tickers, key=lambda x: _compute_display_score_from_row(x), reverse=True)[:5]:
+                display_score = _compute_display_score_from_row(item)
+                hb = item.get('heartbeat')
+                logger.info("   " + _format_full_labels(item, hb, display_score))
 
         except Exception as e:
             logger.error(f"❌ Monitoring error: {e}")
@@ -1478,7 +1647,20 @@ def run() -> None:
                 sleep_seconds = max(60, int(seconds_until_pick))  # At least 60 seconds
                 logger.info(f"⏰ Adjusting sleep to {sleep_seconds/60:.1f} min to wake at {start_t.strftime('%H:%M')} for pick selection")
 
-        time.sleep(sleep_seconds)
+        # WRAP SLEEP: record planned wake and detect overshoot. If we overshoot by
+        # >60s, log a warning and trigger immediate re-check (fallback).
+        planned_wake = time.monotonic() + sleep_seconds
+        try:
+            time.sleep(sleep_seconds)
+        except Exception as e:
+            logger.error(f"❌ Sleep interrupted: {e}", exc_info=True)
+        finally:
+            actual = time.monotonic()
+            if actual > planned_wake + 60:
+                logger.warning(f"⚠️ Sleep overshot planned wake by {actual - planned_wake:.1f}s; forcing immediate re-evaluation")
+                # Immediate re-evaluation: continue the loop to pick up snapshots
+                continue
+        
 
     logger.info("Scanner stopped.")
 
