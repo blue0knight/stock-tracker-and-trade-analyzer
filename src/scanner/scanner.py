@@ -25,6 +25,9 @@ from src.core.output import write_watchlist
 from src.adapters import polygon_adapter as pa
 from src.adapters.polygon_adapter import fetch_snapshots
 
+# Systems (Phase 2)
+from src.systems import system1, system2
+
 # Optional scheduler hook (Phase 1). Kept minimal and reversible.
 try:
     # Local import to avoid introducing dependency when not used
@@ -39,6 +42,7 @@ except Exception:
 ROOT = Path(__file__).resolve().parents[2]
 ENV_PATH = ROOT / ".env"
 CONFIG_PATH = ROOT / "configs" / "scanner.yaml"
+SYSTEMS_CONFIG_PATH = ROOT / "configs" / "systems.yaml"
 
 print(f"DEBUG: Expecting .env at {ENV_PATH}")
 load_dotenv(ENV_PATH)
@@ -46,6 +50,60 @@ load_dotenv(ENV_PATH)
 if not os.getenv("POLYGON_API_KEY"):
     raise RuntimeError(f"❌ POLYGON_API_KEY not loaded. Expected in {ENV_PATH}")
 print("DEBUG: POLYGON_API_KEY loaded ✓")
+
+def load_systems_config():
+    """Load and validate systems configuration.
+    
+    Returns:
+        dict: Systems configuration
+    """
+    if not SYSTEMS_CONFIG_PATH.exists():
+        logger.warning("Systems config not found at %s", SYSTEMS_CONFIG_PATH)
+        return {"systems": {"enabled": []}}
+        
+    with open(SYSTEMS_CONFIG_PATH) as f:
+        config = yaml.safe_load(f)
+        
+    return config
+
+def get_picks_from_systems(state: str):
+    """Get picks from all enabled systems for current market state.
+    
+    Args:
+        state: Current market state (PREMARKET, OPEN, etc)
+        
+    Returns:
+        dict: System picks by system name
+    """
+    systems_config = load_systems_config()
+    enabled_systems = systems_config.get("systems", {}).get("enabled", [])
+    
+    picks = {}
+    if "system1" in enabled_systems:
+        picks["system1"] = system1.get_current_picks(state)
+        
+    if "system2" in enabled_systems:
+        picks["system2"] = system2.get_current_picks(state)
+        
+    return picks
+
+def validate_systems():
+    """Validate all enabled systems.
+    
+    Returns:
+        bool: True if all systems valid
+    """
+    systems_config = load_systems_config()
+    enabled_systems = systems_config.get("systems", {}).get("enabled", [])
+    
+    valid = True
+    if "system1" in enabled_systems:
+        valid &= system1.validate_system()
+        
+    if "system2" in enabled_systems:
+        valid &= system2.validate_system()
+        
+    return valid
 
 
 def load_config(path: Path = CONFIG_PATH) -> dict:

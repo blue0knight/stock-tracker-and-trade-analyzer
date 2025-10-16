@@ -1,0 +1,15 @@
+# Systems configuration for Phase 2 implementation
+systems:
+  enabled:
+    - system1  # Enable/disable system1
+    - system2  # Enable/disable system2
+  
+  system1:
+    name: "System1"
+    enabled: true
+    # Add system1-specific config here
+    
+  system2: 
+    name: "System2"
+    enabled: true
+    # Add system2-specific config here
