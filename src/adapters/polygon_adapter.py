@@ -148,6 +148,26 @@ def is_deficient_nasdaq(ticker: str, lookback_days: int = 45, grace_period_days:
         _DEFICIENCY_CACHE[ticker] = result
         return result
 
+
+def is_ticker_deficient_fast(ticker: str, timeout: int = 5) -> tuple[bool, str]:
+    """
+    Run is_deficient_nasdaq with a safety timeout. On timeout or error,
+    assume not deficient (do not filter out). This prevents the scanner from
+    blocking on slow API calls for many tickers.
+
+    Returns: (is_deficient: bool, reason: str)
+    """
+    try:
+        import concurrent.futures
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+            fut = ex.submit(is_deficient_nasdaq, ticker)
+            return fut.result(timeout=timeout)
+    except concurrent.futures.TimeoutError:
+        return (False, "timeout_assume_ok")
+    except Exception:
+        return (False, "error_assume_ok")
+
 def is_ticker_tradeable(ticker: str) -> tuple[bool, str]:
     """
     Check if ticker is tradeable (not delisted, deficient, or OTC).

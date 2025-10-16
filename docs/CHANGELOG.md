@@ -1,3 +1,9 @@
+## [hotfix/v0.4.2] - 2025-10-16
+### Added
+- Heartbeat: Harden one-time market-open allowance so the scanner only awards a single first-scan heartbeat bypass at open. Added runtime diagnostics (MARKET_OPEN_FIRST_SCAN, MARKET_OPEN_FIRST_SCAN_USED) and clearer logging around allowance consumption.
+- Smart-Sleep: Fixed sleep drift/overshoot handling by using monotonic planned wake times and adding defensive wake/overshoot logging so long sleeps trigger immediate re-evaluation instead of silently waiting.
+- Deficiency Filter: Throttled expensive historical/deficiency checks to the top-N candidates and added a per-call timeout (fail-open) to avoid blocking the selection path.
+
 ## [dev/premarket-test] - 2025-10-08
 ### Added
 - **End-of-Day Analysis System** (`scripts/analyze_eod.py`)
