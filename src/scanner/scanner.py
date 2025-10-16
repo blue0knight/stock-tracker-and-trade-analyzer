@@ -44,6 +44,34 @@ ENV_PATH = ROOT / ".env"
 CONFIG_PATH = ROOT / "configs" / "scanner.yaml"
 SYSTEMS_CONFIG_PATH = ROOT / "configs" / "systems.yaml"
 
+# Phase 3 simulation opt-in (bootstrap only; guarded)
+SIM_MODE = os.getenv("SCANNER_SIM_MODE", "0") == "1"
+SIM_START = os.getenv("SCANNER_SIM_START")
+SIM_END = os.getenv("SCANNER_SIM_END")
+
+if SIM_MODE:
+    # Require explicit start/end for safety
+    if not (SIM_START and SIM_END):
+        msg = ("Simulation mode requires SCANNER_SIM_START and "
+               "SCANNER_SIM_END (YYYY-MM-DD). Exiting.")
+        print(msg)
+        sys.exit(0)
+    try:
+        # Optional import; fall back safely if data_model missing
+        from src.core.data_model import SimulationState  # type: ignore
+    except Exception:
+        # Fail-open: log and disable simulation to keep production flow intact
+        logging.getLogger(__name__).warning(
+            "Simulation requested but SimulationState unavailable; continuing without simulation."
+        )
+        SIM_MODE = False
+    else:
+        sim_state = SimulationState(SIM_START, SIM_END)
+        # Ensure visible startup notice even if logging is not configured
+        msg = f"🕒 Simulation Mode: {SIM_START} to {SIM_END}"
+        print(msg)
+        logging.getLogger(__name__).info(msg)
+
 print(f"DEBUG: Expecting .env at {ENV_PATH}")
 load_dotenv(ENV_PATH)
 

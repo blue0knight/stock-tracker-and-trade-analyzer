@@ -63,6 +63,10 @@ output:
   today_pick: "output/today_pick.csv"     # 👈 NEW: explicit path
   log: "logs/scanner.log"
   schema: "schemas/watchlist.schema.json"
+  simulation:
+    enabled: false        # Opt-in; use SCANNER_SIM_MODE=1 to enable at runtime
+    pause_threshold_mins: 15
+    scan_interval_mins: 5
 
 # -------------------------------------------------------------------
 # Pump-prone (timing rules)
