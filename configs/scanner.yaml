@@ -6,6 +6,9 @@ premarket:
   start_time: "04:00"      # ET, earliest candles to scan
   end_time: "09:30"        # ET, stop at market open (then run open_selection)
   cadence_minutes: 5       # keep 5 min polling
+  # Phase 1: scheduler options
+  data_delay_minutes: 0    # detect and respect known data delay (minutes)
+  dry_run: false           # set true for scheduler dry-run via SCHEDULER_DRY_RUN
 
 postmarket:
   start_time: "16:00"      # ET, after regular market close

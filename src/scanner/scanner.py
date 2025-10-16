@@ -25,6 +25,13 @@ from src.core.output import write_watchlist
 from src.adapters import polygon_adapter as pa
 from src.adapters.polygon_adapter import fetch_snapshots
 
+# Optional scheduler hook (Phase 1). Kept minimal and reversible.
+try:
+    # Local import to avoid introducing dependency when not used
+    from src.core.scheduler import Scheduler  # type: ignore
+except Exception:
+    Scheduler = None
+
 
 # -------------------------------------------------------------------
 # Env / Config / Logger
@@ -397,6 +404,39 @@ def calculate_composite_score(ticker: str, gap_pct: float, current_price: float,
     composite = gap_score + delta_score + vol_score + velocity_bonus
 
     return composite
+
+
+# ---- Scheduler hook (Phase 1) -------------------------------------------------
+def maybe_run_scheduler_dry_run() -> None:
+    """If SCHEDULER_DRY_RUN env var is set, run the scheduler dry-run and write logs.
+
+    This is intentionally non-invasive: it only runs when explicitly requested via
+    environment variable and uses the Scheduler dry_run API which is read-only.
+    """
+    import os
+    out = os.getenv("SCHEDULER_DRY_RUN")
+    if not out:
+        return
+
+    # If Scheduler couldn't be imported, just warn and return
+    if Scheduler is None:
+        logging.getLogger("scanner").warning("Scheduler module not available; skipping dry-run")
+        return
+
+    try:
+        cfg = load_config()
+    except Exception:
+        cfg = None
+
+    sched = Scheduler(config=cfg)
+    log_path = Path("logs") / "scheduler_dryrun.log"
+    try:
+        sched.dry_run(output_path=log_path, max_lines=200)
+        logging.getLogger("scanner").info(f"Scheduler dry-run completed and written to {log_path}")
+    except Exception:
+        logging.getLogger("scanner").exception("Scheduler dry-run failed")
+
+
 
 
 def _compute_display_score_from_row(row: dict) -> float:
@@ -1672,6 +1712,9 @@ def run() -> None:
 # -------------------------------------------------------------------
 if __name__ == "__main__":
     cfg = load_config()
+
+    # Phase 1: optional scheduler dry-run (no-op unless SCHEDULER_DRY_RUN is set)
+    maybe_run_scheduler_dry_run()
 
     # Seed CSV at start for both modes
     ensure_today_pick_ready(cfg, reset=True)
