@@ -17,6 +17,7 @@ import logging
 import pytz
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Optional
 from dotenv import load_dotenv
 
 # Core + adapters
@@ -132,6 +133,34 @@ def validate_systems():
         valid &= system2.validate_system()
         
     return valid
+
+
+def _invoke_system1_if_applicable(config: dict, sim_state: Optional[object], context: dict) -> list:
+    """
+    Guarded integration point. Returns list of alerts (may be empty).
+    - config: full scanner config loaded from YAML
+    - sim_state: optional SimulationState instance (may be None)
+    - context: assembled context (ticker_data, now, etc.)
+    """
+    try:
+        systems_cfg = config.get("systems", {})
+        system1_cfg = systems_cfg.get("system1", {})
+        if not system1_cfg.get("enabled", False):
+            return []
+        # lazy import to avoid hard dependency
+        from src.systems import system1
+    except Exception:
+        # If import fails, do not break scanner; log and return no alerts
+        print("System1 requested but not available; skipping system1 scan.")
+        return []
+    local_context = dict(context)
+    local_context["config"] = systems_cfg
+    try:
+        alerts = system1.run_system1_scan(local_context, sim_state)
+    except Exception as e:
+        print(f"System1 scan failed: {e}")
+        alerts = []
+    return alerts
 
 
 def load_config(path: Path = CONFIG_PATH) -> dict:

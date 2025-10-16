@@ -7,7 +7,14 @@ systems:
   system1:
     name: "System1"
     enabled: true
-    # Add system1-specific config here
+    # System1 (Explosive Alerts) configuration
+    premarket_window_mins: 30
+    lookback_minutes: 5
+    volume_multiplier_threshold: 3.0
+    price_change_pct_threshold: 1.5
+    min_avg_volume: 1000
+    alert_window_mins: 5
+    alert_action: "log"
     
   system2: 
     name: "System2"
