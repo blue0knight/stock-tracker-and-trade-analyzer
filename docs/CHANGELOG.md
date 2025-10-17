@@ -1,5 +1,28 @@
 # 📜 **CHANGELOG.md**
 
+## [Phase 6 — Hardening & Diagnostics] — 2025-10-17
+### Added
+- **Centralized Logging Configuration**
+  - Introduced `src/core/logging_config.py` with idempotent `configure_logging()` setup (console + file handlers, safe fallback to console-only).  
+  - Added `configs/logging.yaml` (planned) for log-level and file-path control.  
+
+- **Diagnostics Framework**
+  - Created `src/core/diagnostics.py` providing lightweight metrics (counters + timers).  
+  - Global singleton `DIAG` (disabled by default) allows optional instrumentation without runtime overhead.  
+
+- **Instrumentation**
+  - Integrated `configure_logging()` and `DIAG` hooks into `scanner.py` for safe event/time tracking on System 2 invocations.  
+  - Added `tests/test_diagnostics.py` (metrics + timing) and `tests/test_tiebreak.py` (deterministic ordering).  
+
+### Changed
+- None (additive-only, dry-run-safe).
+
+### Notes
+- Diagnostics disabled by default; enable via `DIAG.enabled = True` or config toggle for local validation.  
+- Logging setup is idempotent and fault-tolerant; repeated calls are no-ops.  
+- All Phase 6 commits validated via `py_compile`, unit tests, and dry-run integration.
+
+
 ## [Phase 5 — System 2 Pick Generator] — 2025-10-17
 ### Added
 - **System 2: Pick Generator**

@@ -28,6 +28,8 @@ from src.adapters.polygon_adapter import fetch_snapshots
 
 # Systems (Phase 2)
 from src.systems import system1, system2
+from src.core.logging_config import configure_logging
+from src.core.diagnostics import DIAG
 
 # Optional scheduler hook (Phase 1). Kept minimal and reversible.
 try:
@@ -82,6 +84,11 @@ load_dotenv(ENV_PATH)
 if not os.getenv("POLYGON_API_KEY"):
     raise RuntimeError(f"❌ POLYGON_API_KEY not loaded. Expected in {ENV_PATH}")
 print("DEBUG: POLYGON_API_KEY loaded ✓")
+# configure logging early (idempotent)
+try:
+    configure_logging()
+except Exception:
+    logging.getLogger(__name__).warning("configure_logging failed; continuing with default logging")
 
 def load_systems_config():
     """Load and validate systems configuration.
@@ -187,9 +194,25 @@ def _invoke_system2_if_applicable(config: dict, sim_state: Optional[object], con
     local_context = dict(context)
     local_context["config"] = systems_cfg
     try:
-        picks = system2.generate_picks(systems_cfg, sim_state, local_context)
+        # record invocation and time the call if diagnostics enabled
+        try:
+            DIAG.record_event("system2.invoked")
+        except Exception:
+            pass
+        @DIAG.timeit("system2.duration")
+        def _call():
+            return system2.generate_picks(systems_cfg, sim_state, local_context)
+        picks = _call()
+        try:
+            DIAG.record_event("system2.picks_returned", len(picks) if picks else 0)
+        except Exception:
+            pass
     except Exception as e:
         print(f"System2 pick generation failed: {e}")
+        try:
+            DIAG.record_event("system2.failed")
+        except Exception:
+            pass
         picks = []
     return picks
 
