@@ -46,6 +46,7 @@ docs/archive/
 # --- Private Documentation (contains specific trades/performance) ---
 docs/SYSTEM_GUIDE.md
 docs/ARCHITECTURE.md
+/docs/governance/*
 docs/handover_template.md
 POST_MORTEM_2025-10-14.md
 TOMORROW_TEST_PLAN.md
