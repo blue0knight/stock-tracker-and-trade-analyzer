@@ -1,7 +1,5 @@
 # Systems configuration for Phase 2 implementation
 systems:
-# Systems configuration for Phase 2 implementation
-systems:
   enabled:
     - system1  # Enable/disable system1
     - system2  # Enable/disable system2
@@ -19,13 +17,13 @@ systems:
     alert_action: "log"
 
   system2:
-    name: "System2"
-    enabled: true
+    name: "System 2"
+    enabled: false
     # System2 (Pick Generator) configuration
-    max_picks: 5
+    max_picks: 3
     min_price: 1.0
     min_intraday_volume: 1000
-    min_rvol: 0.5
-    min_score: 0.0
+    min_rvol: 1.0
+    min_score: 1.0
     priority_alerts_only: false
     pick_action: "log"

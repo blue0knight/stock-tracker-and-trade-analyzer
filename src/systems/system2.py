@@ -1,30 +1,35 @@
 from __future__ import annotations
 
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 
 from src.core.pick_utils import _rank_candidates
 
-"""System2: Pick Generator (Phase 5)
+"""
+System2: Pick Generator (Phase 5)
 
-Simple, deterministic pick generator that ranks enriched candidates and
-optionally applies alert-derived bonuses from other systems.
+This module implements a deterministic, defensive pick generator for System2.
+Key rules:
+- Safe casting: invalid rows are skipped
+- Deterministic alert bonus: fixed ADDITIVE bonus when a ticker matches an alert
+- Config-driven gating (min_price, min_rvol, min_intraday_volume, priority_alerts_only)
 """
 
+ALERT_BONUS_FIXED = 0.1  # deterministic, phase-locked
 
-def generate_picks(cfg: dict, sim_state: Optional[object], ctx: dict) -> List[Dict]:
-    """Generate picks from enriched candidates.
+
+def generate_picks(cfg: Dict[str, Any], sim_state: Optional[object], ctx: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Generate deterministic picks from enriched candidates.
 
     Args:
-        cfg: systems configuration dict (whole scanner systems block recommended)
-        sim_state: optional SimulationState instance (unused here but accepted)
-        ctx: runtime context containing 'enriched' (list of candidate dicts)
+        cfg: systems configuration dict
+        sim_state: unused simulation state placeholder
+        ctx: context with keys 'enriched' (list) and optional 'system1_alerts' (list)
 
     Returns:
-        List[Dict]: list of pick dicts (top_n) with `pick_score` inserted.
+        list of pick dicts (each enriched with 'pick_score' and optional 'alert_bonus')
     """
     systems_cfg = cfg or {}
     s2 = systems_cfg.get("system2", {})
-    # Support both 'max_picks' and legacy 'top_n'
     top_n = int(s2.get("max_picks", s2.get("top_n", 5)))
     min_price = float(s2.get("min_price", 1.0))
     min_intraday_volume = int(s2.get("min_intraday_volume", 0))
@@ -34,45 +39,47 @@ def generate_picks(cfg: dict, sim_state: Optional[object], ctx: dict) -> List[Di
 
     candidates = list(ctx.get("enriched") or [])
 
-    # Apply simple alert bonus: if ctx has system1_alerts mapping, boost matching tickers
-    alert_map = {}
-    for a in ctx.get("system1_alerts") or []:
-        t = a.get("ticker")
-        if not t:
+    # Build alert_map (uppercase ticker -> alert dict)
+    alert_map: Dict[str, Dict[str, Any]] = {}
+    for a in (ctx.get("system1_alerts") or []):
+        sym = a.get("symbol") or a.get("ticker") or a.get("symbol_ticker")
+        if not sym:
             continue
-        # Use a small deterministic bonus based on alert score if present
-        try:
-            alert_map[t.upper()] = float(a.get("score", 1.0)) * 0.5
-        except Exception:
-            alert_map[t.upper()] = 0.5
+        alert_map[str(sym).upper()] = a
 
-    # Inject alert_bonus into candidates where applicable
-    for c in candidates:
-        t = (c.get("ticker") or "").upper()
-        if t in alert_map:
-            c["alert_bonus"] = alert_map[t]
-
-    # Apply configurable filtering (min_price, min_intraday_volume, min_rvol, priority_alerts_only)
-    filtered: List[Dict] = []
+    # Inject deterministic alert_bonus for matches
     for c in candidates:
         try:
-            price = float(c.get("last_price") or c.get("price") or c.get("close") or 0.0)
+            t = (c.get("ticker") or c.get("symbol") or "").upper()
         except Exception:
-            price = 0.0
+            t = ""
+        if t and t in alert_map:
+            c["alert_bonus"] = ALERT_BONUS_FIXED
+
+    # Filtering with safe casts
+    filtered: List[Dict[str, Any]] = []
+    for c in candidates:
+        # price
+        try:
+            price = float(c.get("last_price") or c.get("price") or c.get("close"))
+        except Exception:
+            continue
         if price < min_price:
             continue
 
+        # intraday volume
         try:
             intraday_vol = int(c.get("intraday_volume") or c.get("intraday_vol") or c.get("volume") or 0)
         except Exception:
-            intraday_vol = 0
+            continue
         if intraday_vol < min_intraday_volume:
             continue
 
+        # rvol
         try:
-            rvol = float(c.get("rvol") or 0.0)
+            rvol = float(c.get("rvol"))
         except Exception:
-            rvol = 0.0
+            continue
         if rvol < min_rvol:
             continue
 
@@ -81,53 +88,20 @@ def generate_picks(cfg: dict, sim_state: Optional[object], ctx: dict) -> List[Di
 
         filtered.append(c)
 
+    # Rank deterministically using shared helper (which performs rounding and tie-breaks)
     ranked = _rank_candidates(filtered, top_n=top_n)
 
-    # Filter by min_score
+    # Enforce min_score after ranking (pick_score is present on each ranked item)
     final = [r for r in ranked if float(r.get("pick_score", 0.0)) >= min_score]
 
     return final
 
 
-def get_current_picks(state: str) -> List[Dict]:
-    """Backwards-compatible stub for scanner.get_picks_from_systems.
-
-    This is intentionally minimal; real invocation should use `generate_picks` via
-    integration point in scanner with full cfg/sim_state/context.
-    """
+def get_current_picks(state: str) -> List[Dict[str, Any]]:
+    """Legacy stub kept for compatibility with scanner dry-run flows."""
     return []
 
 
 def validate_system() -> bool:
-    """Basic validation helper used by scanner.validate_systems()."""
-    # No external deps; always valid
-    return True
-"""System2 module for Phase 2 implementation.
-
-Provides a dry-run compatible stub for System2 operations.
-"""
-import logging
-
-logger = logging.getLogger(__name__)
-
-def get_current_picks(state: str) -> list:
-    """Get current picks for System2 based on market state.
-    
-    Args:
-        state: Current market state (e.g. PREMARKET)
-        
-    Returns:
-        List of picks (empty during dry-run)
-    """
-    logger.info("System2: Processing picks for state %s", state)
-    # Dry-run stub - no external calls
-    return []
-
-def validate_system() -> bool:
-    """Validate System2 configuration and dependencies.
-    
-    Returns:
-        True if system is valid
-    """
-    logger.info("System2: Validating configuration")
+    """Lightweight validator used by scanner.validate_systems() to sanity-check presence."""
     return True
