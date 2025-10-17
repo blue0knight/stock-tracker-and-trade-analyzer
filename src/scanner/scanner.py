@@ -36,6 +36,9 @@ try:
 except Exception:
     Scheduler = None
 
+# Module logger (ensure logger variable exists for functions below)
+logger = logging.getLogger(__name__)
+
 
 # -------------------------------------------------------------------
 # Env / Config / Logger

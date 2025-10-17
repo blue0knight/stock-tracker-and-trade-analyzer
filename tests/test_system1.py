@@ -43,24 +43,31 @@ def test_detect_explosive_events_single_burst():
     # Build a series with strong volume and price move
     vols = [1000, 1200, 1300, 1500]
     series = _make_series("TST", 10.0, 10.6, vols, avg_volume=1000)
-    cfg = system1._load_config({
+    cfg = {
         "enabled": True,
-        "volume_multiplier_threshold": 3.0,
-        "price_change_pct_threshold": 1.0,
-        "min_avg_volume": 500,
-    })
-    alerts = system1.detect_explosive_events(series, cfg)
-    # Expect at least one alert
+        "volume_multiplier_threshold": 1.0,
+        "price_change_pct_threshold": 0.1,
+        "min_avg_volume": 10,
+    }
+    context = {"config": {"system1": cfg}, "ticker_data": {"TST": series}, "dry_run": True}
+    alerts = system1.run_system1_scan(context, None)
+    # Expect at least one alert under forced-low thresholds
     assert isinstance(alerts, list)
-    assert len(alerts) >= 0  # Non-strict: detection depends on thresholds
+    assert len(alerts) > 0
+    # Check expected keys in first alert
+    first = alerts[0]
+    for key in ("symbol", "score", "vol_mult", "price_pct"):
+        assert key in first
 
 
 def test_run_system1_scan_sim_state_respected():
-    # Simulate sim_state outside of series times -> if sim_state were enforced, no alerts
-    # Here we verify function accepts sim_state parameter and runs deterministically
+    # Verify run_system1_scan accepts sim_state parameter and runs deterministically
     vols = [200, 200, 200]
     series = _make_series("SIM", 5.0, 5.1, vols, avg_volume=10000)
-    context = {"system1": {}, "ticker_data": {"SIM": series}}
-    alerts = system1.run_system1_scan({"system1": {"enabled": True}}, None)
-    # Because ticker_data missing in the config passed above, ensure empty list
+    cfg = {"enabled": True, "volume_multiplier_threshold": 100.0}
+    context = {"config": {"system1": cfg}, "ticker_data": {"SIM": series}}
+    # Pass a dummy sim_state object to ensure no exception raised
+    class DummySim: pass
+    sim = DummySim()
+    alerts = system1.run_system1_scan(context, sim)
     assert isinstance(alerts, list)

@@ -107,5 +107,10 @@ def run_system1_scan(context: dict, sim_state: Optional[object] = None) -> List[
         for a in detected:
             a["symbol"] = symbol
             alerts.append(a)
-    logger.debug("System1: %d alerts detected", len(alerts))
+    # Dry-run visibility: allow caller to signal dry_run in context
+    dry_run = bool(context.get("dry_run", False) or (context.get("config") or {}).get("dry_run", False))
+    if alerts:
+        logger.info("System1: %d alerts detected (dry-run=%s)", len(alerts), dry_run)
+    else:
+        logger.debug("System1: %d alerts detected", len(alerts))
     return alerts
