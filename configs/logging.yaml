@@ -1,0 +1,17 @@
+# configs/logging.yaml
+# ------------------------------------------------------------------------------
+# Logging configuration for Polygon Stock Tracker
+# ------------------------------------------------------------------------------
+# Safe defaults: INFO level, console + file ("logs/app.log")
+# (Note: Phase 6 only introduces the template; reading this file is optional.)
+# ------------------------------------------------------------------------------
+
+version: 1
+level: INFO         # DEBUG, INFO, WARNING, ERROR, CRITICAL
+file_path: logs     # Directory where log files are written
+file: app.log       # File name (relative to file_path)
+console: true       # Enable console output
+rotation:
+  enabled: false    # Future extension; rotation is not wired in Phase 6
+  max_bytes: 1048576
+  backup_count: 3
