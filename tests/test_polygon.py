@@ -1,3 +1,10 @@
+import os
+import pytest
+
+if os.getenv("CI"):
+    pytest.skip("Skipping live Polygon API tests in CI environment", allow_module_level=True)
+
+
 from src.adapters.polygon_client import PolygonClient
 
 pc = PolygonClient()
