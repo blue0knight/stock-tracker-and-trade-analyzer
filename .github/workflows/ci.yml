@@ -23,25 +23,23 @@ jobs:
           python -m pip install --upgrade pip
           if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
 
-      - name: Run syntax checks
-        run: python -m py_compile $(git ls-files 'src/**/*.py') || true
+      - name: Show Python env
+        run: |
+          which python
+          python --version
+          pip --version
+          pytest --version
 
-      - name: Run tests
+      - name: Run tests with coverage
         env:
           PYTHONPATH: .
         run: |
-          pytest -q --maxfail=1 --disable-warnings
-
-      - name: Coverage run
-        run: |
-          coverage run -m pytest
+          coverage run -m pytest -q --maxfail=1 --disable-warnings
           coverage xml -o coverage.xml
-
-      - name: Generate coverage HTML
-        run: coverage html
+          coverage html
 
       - name: Archive coverage report
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: coverage-html
           path: htmlcov
