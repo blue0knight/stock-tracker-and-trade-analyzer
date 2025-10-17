@@ -2,20 +2,30 @@
 
 ## [Phase 3 — architecture-implementation] — 2025-10-16
 ### Added
-- **DataDelayModel / Simulation Layer**
   - Introduced `MarketTimestamp` and `SimulationState` for timestamp handling and pause detection.
   - Added deterministic unit tests (`tests/test_data_model.py`).
   - Implemented opt-in simulation bootstrap in `scanner.py` controlled by `SCANNER_SIM_MODE`.
   - Added `simulation:` config block in `scanner.yaml`.
 
 ### Changed
-- None (Phase 3 is additive and opt-in; no impact on production paths).
 
 ### Notes
-- `pytz` remains temporarily; migration to `zoneinfo` scheduled for Phase 4.
-- Phase 4 will wire pause logic into the scheduler for active enforcement.
 
----
+
+
+## [Phase 5 — system2-pick-generator] — 2025-10-17
+### Added
+- **System 2: Pick Generator (Phase 5)**
+  - Implemented `src/systems/system2.py`: deterministic pick generator using normalized features and optional alert bonuses.
+  - Added `src/core/pick_utils.py` with `compute_pick_score()` and `_rank_candidates()` for deterministic scoring and ranking.
+  - Introduced `tests/test_system2.py` covering scoring, filtering, and alert-prioritization (deterministic unit tests).
+  - Config keys added to `configs/systems.yaml` to control `max_picks`, `min_price`, `min_intraday_volume`, `min_rvol`, `min_score`, and `priority_alerts_only`.
+
+### Changed
+- None (additive-only; dry-run safe)
+
+### Notes
+- All new code is dry-run safe and covered by deterministic unit tests. No external network calls or side-effects are introduced.
 
 ## [Phase 2 — architecture-implementation] — 2025-10-15
 ### Added

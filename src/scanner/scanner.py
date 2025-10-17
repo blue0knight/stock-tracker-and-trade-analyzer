@@ -166,6 +166,34 @@ def _invoke_system1_if_applicable(config: dict, sim_state: Optional[object], con
     return alerts
 
 
+def _invoke_system2_if_applicable(config: dict, sim_state: Optional[object], context: dict) -> list:
+    """
+    Guarded integration point for System2. Returns list of picks (may be empty).
+    - config: full scanner config loaded from YAML
+    - sim_state: optional SimulationState instance (may be None)
+    - context: assembled context (ticker_data, now, etc.)
+    """
+    try:
+        systems_cfg = config.get("systems", {})
+        system2_cfg = systems_cfg.get("system2", {})
+        if not system2_cfg.get("enabled", False):
+            return []
+        # lazy import to avoid hard dependency
+        from src.systems import system2
+    except Exception:
+        # If import fails, do not break scanner; log and return no picks
+        print("System2 requested but not available; skipping system2 pick generation.")
+        return []
+    local_context = dict(context)
+    local_context["config"] = systems_cfg
+    try:
+        picks = system2.generate_picks(systems_cfg, sim_state, local_context)
+    except Exception as e:
+        print(f"System2 pick generation failed: {e}")
+        picks = []
+    return picks
+
+
 def load_config(path: Path = CONFIG_PATH) -> dict:
     with open(path, "r") as f:
         return yaml.safe_load(f)
