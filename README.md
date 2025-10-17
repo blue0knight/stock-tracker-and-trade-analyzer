@@ -127,19 +127,107 @@ Outputs a Markdown report:
 
 ---
 
+## 🧪 Developer Guide (Phase 7 — Tests & Release)
+
+### Test Execution
+All system and integration tests are under the `tests/` folder.
+
+```bash
+pytest -q
+```
+
+- Runs all unit + integration tests (15 passed / 1 skipped as of Phase 7).
+- Legacy `test_scoring.py` is intentionally skipped; its logic moved to `alert_scoring.py`.
+
+### Coverage Reports
+To measure test coverage locally:
+
+```bash
+coverage run -m pytest
+coverage report
+coverage html
+```
+
+Artifacts:
+- **`coverage.xml`** → machine-readable coverage for CI  
+- **`htmlcov/index.html`** → interactive HTML coverage dashboard
+
+As of Phase 7 validation:
+- **Overall coverage:** ≈ 34 %  
+- **Core modules:** ≥ 80 % (`src/core/*`, `src/systems/*`)
+
+### Dry-Run Harness Verification
+The dry-run harness validates the scheduler → router → System 2 path safely offline.
+
+```bash
+PYTHONPATH=. python3 scripts/dry_run_integration.py
+```
+
+Expected output:
+```
+🧭 [Router] state=PREMARKET → System1
+🧭 [Router] state=PICK_WINDOW → System2
+🎯 [System2] Pick Generator scaffold active (dry-run=True); picks=2
+```
+
+Diagnostics-enabled snapshot:
+```bash
+PYTHONPATH=. python3 - <<'PY'
+import runpy
+from src.core.diagnostics import DIAG
+DIAG.enabled = True
+runpy.run_path('scripts/dry_run_integration.py', run_name='__main__')
+print(DIAG.export_metrics())
+PY
+```
+
+Sample metrics:
+```json
+{"counters":{"system2.invoked":1,"system2.picks_returned":2},
+ "timers":{"system2.duration":[3.0e-05]}}
+```
+
+### Continuous Integration Workflow
+The CI pipeline (`.github/workflows/ci.yml`) runs automatically on every push / PR:
+
+1. Installs dev dependencies (`requirements-dev.txt`)  
+2. Syntax check (`py_compile`)  
+3. Executes tests + coverage  
+4. Generates `coverage.xml` and `htmlcov/` reports  
+5. Uploads coverage HTML artifact to GitHub Actions  
+
+These CI artifacts satisfy governance requirements for release verification.
+
+### Governance Validation Summary
+| Check | Result | Notes |
+|:--|:--:|:--|
+| Syntax (`py_compile`) | ✅ | All source files valid |
+| Unit / Integration Tests | ✅ | 15 passed, 1 skipped (legacy) |
+| Coverage Generation | ✅ | Functional; overall 34 %, core ≥ 80 % |
+| Diagnostics Default | ✅ | OFF by default, verified in dry-run |
+| CI Artifacts | ✅ | `coverage.xml`, `htmlcov/` generated |
+
+### Release Candidate Preparation
+1. Ensure CI green ✔️  
+2. Create branch → `release/rc-7.0.0-rc1`  
+3. Validate coverage artifacts in Actions tab  
+4. After approval, create annotated tag `v7.0.0` and merge to `main` per `/docs/governance/tag_and_changelog_policy.md`
+
+---
+
 ## 📚 Documentation
 
-- **[EOD Analysis Guide](docs/EOD_ANALYSIS.md)** - How end-of-day analysis works
-- **[Changelog](docs/CHANGELOG.md)** - Version history and changes
+- **[EOD Analysis Guide](docs/EOD_ANALYSIS.md)** – How end-of-day analysis works  
+- **[Changelog](docs/CHANGELOG.md)** – Version history and changes  
 
 ---
 
 ## 🛠️ Roadmap
-- [ ] Add RVOL and ATR stretch into scoring
-- [ ] Schema validation for `watchlist.csv`
-- [ ] Auto-log paper entries when tickers first appear
-- [ ] Equity curve + performance visualization
-- [ ] AI-powered trade recommendations (future)
+- [ ] Add RVOL and ATR stretch into scoring  
+- [ ] Schema validation for `watchlist.csv`  
+- [ ] Auto-log paper entries when tickers first appear  
+- [ ] Equity curve + performance visualization  
+- [ ] AI-powered trade recommendations (future)  
 
 ---
 
