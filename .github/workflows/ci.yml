@@ -33,6 +33,7 @@ jobs:
       - name: Run tests with coverage
         env:
           PYTHONPATH: .
+          POLYGON_API_KEY: "testkey"      # fake key for CI environment
         run: |
           coverage run -m pytest -q --maxfail=1 --disable-warnings
           coverage xml -o coverage.xml
