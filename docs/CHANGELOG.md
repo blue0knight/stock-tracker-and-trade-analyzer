@@ -1,5 +1,49 @@
 # 📜 **CHANGELOG.md**
 
+## [Unreleased] Phase 7 — Tests & Release (October 2025)
+
+### Added
+- **CI Automation** – `.github/workflows/ci.yml` for syntax, test, and coverage verification  
+- **Development Requirements** – `requirements-dev.txt` including `pytest`, `coverage`, `pytest-cov`, and `httpx`  
+- **Test Fixtures & Integration Tests**
+  - `tests/conftest.py` → environment isolation + fake `POLYGON_API_KEY`
+  - `tests/test_integration_systems.py` → dry-run validation with diagnostics enabled
+- **Developer Documentation** – expanded `README.md` with Phase 7 Developer Guide (tests, coverage, dry-run, CI, governance summary)
+- **Governance Artifacts**
+  - Coverage reports: `coverage.xml`, `htmlcov/`
+  - DIAG snapshot verification confirming diagnostics default = OFF
+  - Governance validation summary table included in `README.md`
+
+### Changed
+- **Legacy Test Isolation** – marked `tests/test_scoring.py` as skipped (legacy placeholder)  
+- **Test Path Corrections** – unified imports under `src.*` structure  
+- **Documentation Updates** – integrated coverage and CI instructions in README
+
+### Coverage Snapshot
+| Metric | Result | Notes |
+|:--|:--:|:--|
+| Total coverage | **34 %** | Automated via `pytest-cov` |
+| Core modules | **≥ 80 %** | `src/core/*`, `src/systems/*` |
+| Diagnostics default | ✅ | Verified OFF |
+| Integration tests | ✅ | 15 passed / 1 skipped (legacy) |
+
+### Release Candidate Plan
+- **Branch:** `release/rc-7.0.0-rc1`  
+- **Tag:** `v7.0.0-rc1` → annotated pre-release  
+- **Final Tag:** `v7.0.0` after RC validation and sign-off  
+- **Commit References:**
+  - `2f892f3` – CI workflow  
+  - `a8be5c0` – README update (Phase 7 Developer Guide)
+  - [phase 7 test/fixture commits as validated earlier]
+
+### Validation Summary
+- ✅ Syntax / Build Checks  
+- ✅ All Tests Passing (1 skip legacy)  
+- ✅ Coverage Artifacts Generated  
+- ✅ Diagnostics Stable / Default OFF  
+- ✅ Governance Docs Complete  
+
+
 ## [Phase 6 — Hardening & Diagnostics] — 2025-10-17
 ### Added
 - **Centralized Logging Configuration**
