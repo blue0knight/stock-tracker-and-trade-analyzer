@@ -30,11 +30,14 @@ output/watchlist.csv
 # --- Config (user-specific, evolving) ---
 configs/group_watchlist.csv
 
-# --- Artifacts ---
+# === Coverage & Test Artifacts ===
 *.parquet
 *.sqlite
 *.db
 *.xlsx
+.coverage
+coverage.xml
+htmlcov/
 
 # --- Allow templates in schemas/ ---
 !schemas/*.csv
@@ -52,3 +55,4 @@ POST_MORTEM_2025-10-14.md
 TOMORROW_TEST_PLAN.md
 scripts/analyze_eod_legacy.py
 scripts/analyze_eod_old.py
+
